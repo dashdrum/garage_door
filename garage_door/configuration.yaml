@@ -1,0 +1,131 @@
+## Home Assistant Configuration Snippits for the Garage Door Controller
+##
+## Integrate these into your configuration.yaml
+##
+
+homeassistant:
+
+  customize:
+
+    cover.garage_door:
+      #device_class: garage
+      friendly_name: Garage Door
+      icon: mdi:garage
+    sensor.ga_temp:
+      friendly_name: Garage Temp
+    sensor.ga_pressure:
+      friendly_name: Garage Pressure
+      icon: mdi:gauge
+
+sensor:
+
+  ## Garage Temperature/Pressure Sensor
+
+  - platform: mqtt
+    state_topic: 'garage/sensor1'
+    name: ga_temp
+    unit_of_measurement: '°C'
+    expire_after: 1800
+    value_template: '{{ value_json.temperature }}'
+  - platform: mqtt
+    state_topic: 'garage/sensor1'
+    name: ga_pressure
+    unit_of_measurement: 'mbar'
+    expire_after: 1800
+    value_template: '{{ value_json.pressure }}'
+
+group:
+
+  garage:
+    name: Garage
+    entities:
+      - cover.garage_door
+      - sensor.ga_temp
+
+  pressure:
+    name: Barometric Pressure
+    entities:
+      - sensor.ga_pressure
+
+cover:
+  - platform: mqtt
+    name: garage_door
+    state_topic: "garage/door"
+    command_topic: "garage/button"
+    payload_open: "OPEN"
+    payload_close: "OPEN"
+    payload_stop: "OPEN"
+    state_open: "OPENED"
+    state_closed: "CLOSED"
+    optimistic: false
+    retain: false
+    value_template: '{{ value }}'
+
+
+automation:
+
+  - alias: 'Garage door is opening'
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: 'closed'
+        to: 'open'
+        for:
+          hours: 0
+          minutes: 0
+          seconds: 0
+    action:
+      - service: tts.google_say
+        entity_id: media_player.living_room_home
+        data:
+          message: 'The garage door is opening'
+
+  - alias: 'Garage door open for 30 minutes'
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: 'closed'
+        to: 'open'
+        for:
+          hours: 0
+          minutes: 30
+          seconds: 0
+    action:
+      - service: tts.google_say
+        entity_id: media_player.living_room_home
+        data:
+          message: 'The garage door has been open for 30 minutes'
+
+  - alias: 'Garage door open for 60 minutes - close it'
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: 'closed'
+        to: 'open'
+        for:
+          hours: 0
+          minutes: 60
+          seconds: 0
+    action:
+      - service: cover.close_cover
+        entity_id: cover.garage_door
+      - service: tts.google_say
+        entity_id: media_player.living_room_home
+        data:
+          message: 'The garage door has been open for one hour.  Closing now'
+
+  - alias: 'Garage door has closed'
+    trigger:
+      - platform: state
+        entity_id: cover.garage_door
+        from: 'open'
+        to: 'closed'
+        for:
+          hours: 0
+          minutes: 0
+          seconds: 0
+    action:
+      - service: tts.google_say
+        entity_id: media_player.living_room_home
+        data:
+          message: 'The garage door has closed'
