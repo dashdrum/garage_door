@@ -16,21 +16,23 @@
 const char* host = "GarageESP";
 const char* update_path = "/WebFirmwareUpgrade";
 const char* update_username = "admin";
-const char* update_password = "SECRET";  // Use your favorite password here
+const char* update_password = "password";  // Use your favorite password here
 
 //Define the pins
 const int RELAY_PIN = D1;
 const int DOOR_PIN = D2;
 const int SDA_PIN = D6;
 const int SCL_PIN = D5;
+const int ACCESS_DOOR_PIN = D8;
 
 //Define MQTT Params. 
 #define mqtt_server "192.168.254.118"  // Use your mosquitto IP or host name here
 #define door_topic "garage/door"
 #define button_topic "garage/button"
 #define temp_topic "garage/sensor1"
+#define access_door_topic "garage/access_door"
 const char* mqtt_user = "pi";      // Use your mosquitto username here
-const char* mqtt_pass = "SECRET";  // Use your mosquitto password here
+const char* mqtt_pass = "raspberry";  // Use your mosquitto password here
 
 //************END CUSTOM PARAMS********************//
 //This can be used to output the date the code was compiled
@@ -53,11 +55,15 @@ char* door_state = "UNDEFINED";
 char* last_state = "";
 int open_count = 0;
 long lastTempReport = 0;
+char* access_door_state = "UNDEFINED";
+char* access_last_state = "UNDEFINED";
+int access_open_count = 0;
 
 //Wifi Manager will try to connect to the saved AP. If that fails, it will start up as an AP
 //which you can connect to and setup the wifi
 WiFiManager wifiManager;
 long lastMsg = 0;
+long lastAccessMsg = 0;
 
 BMP280 bmp;
 
@@ -66,6 +72,7 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
   pinMode(DOOR_PIN, INPUT);
+  pinMode(ACCESS_DOOR_PIN, INPUT);
 
   Serial.begin(115200);
 
@@ -88,7 +95,7 @@ void setup() {
   // Setup BMP280 - using D5 as SCL and D6 as SDA
   if(!bmp.begin(SDA_PIN,SCL_PIN)){ 
     Serial.println("BMP init failed!");
-    while(1);
+//    while(1);
   }
   else Serial.println("BMP init success!");
   
@@ -102,6 +109,7 @@ void loop() {
     reconnect();
   }
   checkDoorState();
+  checkAccessDoorState();
   
   reportTempPress();
   
@@ -158,6 +166,41 @@ void checkDoorState() {
   }
 }
 
+void checkAccessDoorState() {
+  //Checks if the door state has changed, and MQTT pub the change
+  
+  if (digitalRead(ACCESS_DOOR_PIN) == 0){ // get new state of door
+    access_open_count++;
+    if(access_open_count > 10){
+      access_door_state = "ON";
+      access_open_count = 0;
+    }
+  }
+  else {
+    access_open_count = 0;
+    access_door_state = "OFF"; 
+  }
+
+  if (access_last_state != access_door_state) { // if the state has changed then publish the change
+    client.publish(access_door_topic, access_door_state);
+    Serial.print("Old access state: ");
+    Serial.println(access_last_state);
+    Serial.print("New access_state: ");
+    Serial.println(access_door_state);
+    access_last_state = access_door_state; //set previous state of door
+  } 
+  
+  //pub every minute, regardless of a change.
+  long now = millis();
+  if(lastAccessMsg > now) lastAccessMsg = now;
+  if ((now - lastAccessMsg) > 60000) {
+    lastAccessMsg = now;
+    client.publish(access_door_topic, access_door_state);
+//    Serial.print("1 minute access update: ");
+//    Serial.println(access_door_state);
+  }
+}
+
 void reportTempPress(){
   
   double T,P;
@@ -180,29 +223,36 @@ void reportTempPress(){
           
           Serial.print("T = \t");Serial.print(T,2); Serial.print(" degC\t");
           Serial.print("P = \t");Serial.print(P,2); Serial.println(" mBar");
-          
-          // create a JSON object
-          // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-          StaticJsonBuffer<200> jsonBuffer;
-          JsonObject& root = jsonBuffer.createObject();
-          // INFO: the data must be converted into a string; a problem occurs when using floats...
-          root["temperature"] = (String)T;
-          root["pressure"] = (String)P;
-          root.prettyPrintTo(Serial);
-          Serial.println("");
-          char data[200];
-          root.printTo(data, root.measureLength() + 1);
-          client.publish(temp_topic, data, true);
+
+          publishTempPress(T, P);
          
         }
         else {
           Serial.println("Error2: Failed to read from BMP280.");
-        }
+          publishTempPress( -102, -102);
+        } 
     }
     else {
       Serial.println("Error1: Failed to read from BMP280.");
+      publishTempPress( -101, -101);
     }
   }
+}
+
+void publishTempPress(float T, float P){
+          
+  // create a JSON object
+  // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  // INFO: the data must be converted into a string; a problem occurs when using floats...
+  root["temperature"] = (String)T;
+  root["pressure"] = (String)P;
+  root.prettyPrintTo(Serial);
+  Serial.println("");
+  char data[200];
+  root.printTo(data, root.measureLength() + 1);
+  client.publish(temp_topic, data, true);
 }
 
 void reconnect() {
