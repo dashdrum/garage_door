@@ -6,17 +6,13 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoJson.h>          // https://github.com/bblanchon/ArduinoJson
-#include "BMP280.h"               // https://github.com/mahfuz195/BMP280-Arduino-Library
+#include "Seeed_BME280.h"               // https://github.com/Seeed-Studio/Grove_BME280
 #include "Wire.h"
 
 
 ////**********START CUSTOM PARAMS******************//
 
-//Define parameters for the http firmware update
-const char* host = "GarageESP";
-const char* update_path = "/WebFirmwareUpgrade";
-const char* update_username = "admin";
-const char* update_password = "password";  // Use your favorite password here
+#include "config.h"
 
 //Define the pins
 const int RELAY_PIN = D1;
@@ -26,13 +22,10 @@ const int SCL_PIN = D5;
 const int ACCESS_DOOR_PIN = D8;
 
 //Define MQTT Params. 
-#define mqtt_server "192.168.254.118"  // Use your mosquitto IP or host name here
 #define door_topic "garage/door"
 #define button_topic "garage/button"
 #define temp_topic "garage/sensor1"
 #define access_door_topic "garage/access_door"
-const char* mqtt_user = "pi";      // Use your mosquitto username here
-const char* mqtt_pass = "raspberry";  // Use your mosquitto password here
 
 //************END CUSTOM PARAMS********************//
 //This can be used to output the date the code was compiled
@@ -65,7 +58,7 @@ WiFiManager wifiManager;
 long lastMsg = 0;
 long lastAccessMsg = 0;
 
-BMP280 bmp;
+BME280 bme280;
 
 void setup() {
   //Set Relay(output) and Door(input) pins
@@ -78,28 +71,29 @@ void setup() {
 
   //Set the wifi config portal to only show for 3 minutes, then continue.
   wifiManager.setConfigPortalTimeout(180);
-  wifiManager.autoConnect(host);
+  wifiManager.autoConnect(CONFIG_OTA_HOST);
 
   //sets up the mqtt server, and sets callback() as the function that gets called
   //when a subscribed topic has data
-  client.setServer(mqtt_server, 1883);
+  client.setServer(CONFIG_MQTT_HOST, CONFIG_MQTT_PORT);
   client.setCallback(callback); //callback is the function that gets called for a topic sub
 
   //setup http firmware update page.
-  MDNS.begin(host);
-  httpUpdater.setup(&httpServer, update_path, update_username, update_password);
+  MDNS.begin(CONFIG_OTA_HOST);
+  httpUpdater.setup(&httpServer, CONFIG_OTA_PATH, CONFIG_OTA_USER, CONFIG_OTA_PASS);
   httpServer.begin();
   MDNS.addService("http", "tcp", 80);
-  Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and your password\n", host, update_path, update_username);
+  Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and your password\n", CONFIG_OTA_HOST, CONFIG_OTA_PATH, CONFIG_OTA_USER);
 
-  // Setup BMP280 - using D5 as SCL and D6 as SDA
-  if(!bmp.begin(SDA_PIN,SCL_PIN)){ 
-    Serial.println("BMP init failed!");
-//    while(1);
+  // Setup BME280 - using D5 as SCL and D6 as SDA
+  Serial.println("setup bme280");
+  //hangs without i2c device
+  if(!bme280.init(SDA_PIN,SCL_PIN)){
+     Serial.println("Device error!");
   }
-  else Serial.println("BMP init success!");
+  Serial.println("done");
   
-  bmp.setOversampling(4);
+//  bmp.setOversampling(4);
 
 }
 
@@ -196,14 +190,14 @@ void checkAccessDoorState() {
   if ((now - lastAccessMsg) > 60000) {
     lastAccessMsg = now;
     client.publish(access_door_topic, access_door_state);
-//    Serial.print("1 minute access update: ");
-//    Serial.println(access_door_state);
+    Serial.print("1 minute access update: ");
+    Serial.println(access_door_state);
   }
 }
 
 void reportTempPress(){
   
-  double T,P;
+  float T,P, H;
   
   long now = millis();
 
@@ -211,35 +205,25 @@ void reportTempPress(){
 
   if ((now - lastTempReport) > 600000 || lastTempReport == 0){  // Report first time then every 10 minutes
     lastTempReport = now;
+    T = bme280.getTemperature();
+    P = bme280.getPressure()/100; // pressure in mbar
+    H = bme280.getHumidity();
+    
+    if(H!=0) // Functions return 0 with error. Humidity should never be 0, right? 
+    {
+      Serial.print("T = \t");Serial.print(T,2); Serial.print(" degC\t");
+      Serial.print("P = \t");Serial.print(P,2); Serial.print(" mbar\t");
+      Serial.print("H = \t");Serial.print(H,2); Serial.println(" %");
 
-    char result = bmp.startMeasurment();
-   
-    if(result!=0){
-      delay(result);
-      result = bmp.getTemperatureAndPressure(T,P);
-      
-        if(result!=0)
-        {
-          
-          Serial.print("T = \t");Serial.print(T,2); Serial.print(" degC\t");
-          Serial.print("P = \t");Serial.print(P,2); Serial.println(" mBar");
-
-          publishTempPress(T, P);
-         
-        }
-        else {
-          Serial.println("Error2: Failed to read from BMP280.");
-          publishTempPress( -102, -102);
-        } 
+      publishResults(T,P,H);
     }
     else {
-      Serial.println("Error1: Failed to read from BMP280.");
-      publishTempPress( -101, -101);
-    }
+      Serial.println("Error2: Failed to read from BME280.");
+    } 
   }
 }
 
-void publishTempPress(float T, float P){
+void publishResults(float T, float P, float H){
           
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
@@ -248,6 +232,7 @@ void publishTempPress(float T, float P){
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = (String)T;
   root["pressure"] = (String)P;
+  root["humidity"] = (String)H;
   root.prettyPrintTo(Serial);
   Serial.println("");
   char data[200];
@@ -258,10 +243,10 @@ void publishTempPress(float T, float P){
 void reconnect() {
   //Reconnect to Wifi and to MQTT. If Wifi is already connected, then autoconnect doesn't do anything.
   
-  wifiManager.autoConnect(host);
+  wifiManager.autoConnect(CONFIG_OTA_HOST);
   
   Serial.print("Attempting MQTT connection...");
-  if (client.connect(host, mqtt_user, mqtt_pass)) {
+  if (client.connect(CONFIG_MQTT_CLIENT_ID, CONFIG_MQTT_USER, CONFIG_MQTT_PASS)) {
     Serial.println("connected");
     client.subscribe("garage/#");
   } else {
