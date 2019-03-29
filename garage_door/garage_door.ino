@@ -19,7 +19,7 @@ const int RELAY_PIN = D1;
 const int DOOR_PIN = D2;
 const int SDA_PIN = D6;
 const int SCL_PIN = D5;
-const int ACCESS_DOOR_PIN = D8;
+const int ACCESS_DOOR_PIN = D7;
 
 //Define MQTT Params. 
 #define door_topic "garage/door"
@@ -148,6 +148,9 @@ void checkDoorState() {
   }
 
   if (last_state != door_state) { // if the state has changed then publish the change
+    if (!client.connected()) {
+      reconnect();
+    }
     client.publish(door_topic, door_state);
     Serial.println(door_state);
   }
@@ -156,6 +159,9 @@ void checkDoorState() {
   if(lastMsg > now) lastMsg = now;
   if ((now - lastMsg) > 60000) {
     lastMsg = now;
+    if (!client.connected()) {
+      reconnect();
+    }
     client.publish(door_topic, door_state);
   }
 }
@@ -176,6 +182,9 @@ void checkAccessDoorState() {
   }
 
   if (access_last_state != access_door_state) { // if the state has changed then publish the change
+    if (!client.connected()) {
+      reconnect();
+    }
     client.publish(access_door_topic, access_door_state);
     Serial.print("Old access state: ");
     Serial.println(access_last_state);
@@ -189,6 +198,9 @@ void checkAccessDoorState() {
   if(lastAccessMsg > now) lastAccessMsg = now;
   if ((now - lastAccessMsg) > 60000) {
     lastAccessMsg = now;
+    if (!client.connected()) {
+      reconnect();
+    }
     client.publish(access_door_topic, access_door_state);
     Serial.print("1 minute access update: ");
     Serial.println(access_door_state);
@@ -237,6 +249,9 @@ void publishResults(float T, float P, float H){
   Serial.println("");
   char data[200];
   root.printTo(data, root.measureLength() + 1);
+  if (!client.connected()) {
+    reconnect();
+  }
   client.publish(temp_topic, data, true);
 }
 
