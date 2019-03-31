@@ -6,8 +6,8 @@
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoJson.h>          // https://github.com/bblanchon/ArduinoJson
-#include "Seeed_BME280.h"               // https://github.com/Seeed-Studio/Grove_BME280
-#include "Wire.h"
+#include <Adafruit_Sensor.h>
+#include <Adafruit_AM2320.h>
 
 
 ////**********START CUSTOM PARAMS******************//
@@ -58,7 +58,7 @@ WiFiManager wifiManager;
 long lastMsg = 0;
 long lastAccessMsg = 0;
 
-BME280 bme280;
+Adafruit_AM2320 am2320 = Adafruit_AM2320();
 
 void setup() {
   //Set Relay(output) and Door(input) pins
@@ -85,15 +85,13 @@ void setup() {
   MDNS.addService("http", "tcp", 80);
   Serial.printf("HTTPUpdateServer ready! Open http://%s.local%s in your browser and login with username '%s' and your password\n", CONFIG_OTA_HOST, CONFIG_OTA_PATH, CONFIG_OTA_USER);
 
-  // Setup BME280 - using D5 as SCL and D6 as SDA
-  Serial.println("setup bme280");
+  // Setup AM2320 - using D5 as SCL and D6 as SDA
+  Serial.println("setup am2320");
   //hangs without i2c device
-  if(!bme280.init(SDA_PIN,SCL_PIN)){
+  if(!am2320.begin(SDA_PIN,SCL_PIN)){
      Serial.println("Device error!");
   }
   Serial.println("done");
-  
-//  bmp.setOversampling(4);
 
 }
 
@@ -209,7 +207,7 @@ void checkAccessDoorState() {
 
 void reportTempPress(){
   
-  float T,P, H;
+  float T, H;
   
   long now = millis();
 
@@ -217,25 +215,23 @@ void reportTempPress(){
 
   if ((now - lastTempReport) > 600000 || lastTempReport == 0){  // Report first time then every 10 minutes
     lastTempReport = now;
-    T = bme280.getTemperature();
-    P = bme280.getPressure()/100; // pressure in mbar
-    H = bme280.getHumidity();
+    T = am2320.readTemperature();
+    H = am2320.readHumidity();
     
     if(H!=0) // Functions return 0 with error. Humidity should never be 0, right? 
     {
       Serial.print("T = \t");Serial.print(T,2); Serial.print(" degC\t");
-      Serial.print("P = \t");Serial.print(P,2); Serial.print(" mbar\t");
       Serial.print("H = \t");Serial.print(H,2); Serial.println(" %");
 
-      publishResults(T,P,H);
+      publishResults(T,H);
     }
     else {
-      Serial.println("Error2: Failed to read from BME280.");
+      Serial.println("Error2: Failed to read from AM2320.");
     } 
   }
 }
 
-void publishResults(float T, float P, float H){
+void publishResults(float T, float H){
           
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
@@ -243,7 +239,6 @@ void publishResults(float T, float P, float H){
   JsonObject& root = jsonBuffer.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = (String)T;
-  root["pressure"] = (String)P;
   root["humidity"] = (String)H;
   root.prettyPrintTo(Serial);
   Serial.println("");
