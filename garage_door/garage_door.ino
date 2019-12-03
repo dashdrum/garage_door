@@ -73,6 +73,10 @@ void setup() {
   wifiManager.setConfigPortalTimeout(180);
   wifiManager.autoConnect(CONFIG_OTA_HOST);
 
+  if (WiFi.status() != WL_CONNECTED){  // if not connected then restart ESP
+    ESP.restart();
+  }
+
   //sets up the mqtt server, and sets callback() as the function that gets called
   //when a subscribed topic has data
   client.setServer(CONFIG_MQTT_HOST, CONFIG_MQTT_PORT);
@@ -253,7 +257,10 @@ void publishResults(float T, float H){
 void reconnect() {
   //Reconnect to Wifi and to MQTT. If Wifi is already connected, then autoconnect doesn't do anything.
   
-  wifiManager.autoConnect(CONFIG_OTA_HOST);
+  while(WiFi.status() != WL_CONNECTED){
+    Serial.println("Trying reconnect to WiFi");
+    wifiManager.autoConnect(CONFIG_OTA_HOST);
+  }
   
   Serial.print("Attempting MQTT connection...");
   if (client.connect(CONFIG_MQTT_CLIENT_ID, CONFIG_MQTT_USER, CONFIG_MQTT_PASS)) {
